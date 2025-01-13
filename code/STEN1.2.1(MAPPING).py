@@ -4,7 +4,6 @@ from math import cos, sin, radians
 import math
 import time
 import matplotlib.pyplot as plt
-import os
 
 # Pin configuration
 PWM_PINL = 13# Left PWM pin
@@ -21,34 +20,8 @@ MotorR1 = 0
 MotorR2 = 1#High = forward
 
 PWM_FREQUENCY = 1000  # Frequency in Hz (e.g., 1000 Hz)
+
 devMode = True
-
-# Open the video
-if devMode:
-    cap = cv2.VideoCapture('test.mp4')
-#cap = cv2.imread('image.png')
-
-# Create a named window
-cv2.namedWindow('Lines Detection', cv2.WINDOW_NORMAL)
-
-# Move the window to the desired position (x, y)
-window_x = 0  # Horizontal position
-window_y = -50  # Vertical position
-cv2.moveWindow('Lines Detection', window_x, window_y)
-angle = 0
-fit = None
-errors = 0
-lastX = 500
-fps = 0
-frame_count = 0
-fps_start_time = time.time()
-
-output_filename = '/home/malte/film1.mp4'
-fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-recordingFPS = 50
-recording_size = (640, 480)
-out = cv2.VideoWriter(output_filename, fourcc, recordingFPS, recording_size)
-
 if not devMode:
     from picamera2 import Picamera2
     import lgpio
@@ -76,24 +49,10 @@ if not devMode:
     #init Led
     lgpio.gpio_claim_output(h, LedPin)
 
-    import board
-    import busio
-    from adafruit_bno08x.i2c import BNO08X_I2C
-
-    # Initialize I2C
-    i2c = busio.I2C(board.SCL, board.SDA)
-    bno = BNO08X_I2C(i2c)
-    bno.enable_feature(0x05)
-    if os.path.exists('/home/malte/test'):
-        os.remove('/home/malte/test')
-
-if devMode:
-    with open("test", "r") as file:
-        data = file.readlines()
-    dataIteration = 0
 
 def math_sign(value):
     return (value > 0) - (value < 0)
+
 
 def runMotors(radius, wanted_speed_outside):
     # Start PWM on the pin
@@ -130,26 +89,29 @@ def runMotors(radius, wanted_speed_outside):
         
     #Skicka datan till motorerna
     print(current_speed_l, current_speed_r)
-    
-    if current_speed_l < 0:
-        MotorL1 = 1
-        MotorL2 = 0
-    else:
-        MotorL1 = 0
-        MotorL2 = 1
-    lgpio.gpio_write(h, MotorLPin1, MotorL1)
-    lgpio.gpio_write(h, MotorLPin2, MotorL2)
-    if current_speed_r < 0:
-        MotorR1 = 1
-        MotorR2 = 0
-    else:
-        MotorR1 = 0
-        MotorR2 = 1
-    lgpio.gpio_write(h, MotorRPin1, MotorR1)
-    lgpio.gpio_write(h, MotorRPin2, MotorR2)
-    lgpio.tx_pwm(h, PWM_PINR, PWM_FREQUENCY, abs(current_speed_r))
-    lgpio.tx_pwm(h, PWM_PINL, PWM_FREQUENCY, abs(current_speed_l))
-    lgpio.gpio_write(h, LedPin, 1)
+
+    if not devMode:
+        if current_speed_l < 0:
+            MotorL1 = 1
+            MotorL2 = 0
+        else:
+            MotorL1 = 0
+            MotorL2 = 1
+        lgpio.gpio_write(h, MotorLPin1, MotorL1)
+        lgpio.gpio_write(h, MotorLPin2, MotorL2)
+        if current_speed_r < 0:
+            MotorR1 = 1
+            MotorR2 = 0
+        else:
+            MotorR1 = 0
+            MotorR2 = 1
+        lgpio.gpio_write(h, MotorRPin1, MotorR1)
+        lgpio.gpio_write(h, MotorRPin2, MotorR2)
+        lgpio.tx_pwm(h, PWM_PINR, PWM_FREQUENCY, abs(current_speed_r))
+        lgpio.tx_pwm(h, PWM_PINL, PWM_FREQUENCY, abs(current_speed_l))
+        lgpio.gpio_write(h, LedPin, 1)
+
+
 
 def get_intersection_data(image, mask, x, y, angle, forward_distance):
     nIntersectedLines = []
@@ -200,6 +162,7 @@ def get_intersection_data(image, mask, x, y, angle, forward_distance):
     else:
         return image, nIntersectedLines, (None, None)
 
+
 def get_perpendicular_line(image, mask, x, y, angle, forward_distance):
     points = []
     values = []
@@ -247,6 +210,7 @@ def get_perpendicular_line(image, mask, x, y, angle, forward_distance):
     else:
         return image, None, None, None  # No black line found
 
+
 def locate_green_spaces(gMask):
 
     # Find contours in the mask
@@ -263,72 +227,52 @@ def locate_green_spaces(gMask):
                 points.append((cX, cY))
     return points
 
-def quaternion_to_euler(x, y, z, w):
-    # Calculate Roll
-    roll = math.atan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y))
-    roll = math.degrees(roll)  # Convert to degrees
 
-    # Calculate Pitch
-    sinp = 2.0 * (w * y - z * x)
-    if abs(sinp) >= 1:
-        pitch = math.copysign(90.0, sinp)  # Use 90 degrees if out of range
-    else:
-        pitch = math.asin(sinp)
-        pitch = math.degrees(pitch)  # Convert to degrees
+# Open the video
+if devMode:
+    cap = cv2.VideoCapture('LiveRecording.mp4')
+#cap = cv2.imread('image.png')
 
-    # Calculate Yaw
-    yaw = math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
-    yaw = math.degrees(yaw)  # Convert to degrees
+# Create a named window
+cv2.namedWindow('Lines Detection', cv2.WINDOW_NORMAL)
 
-    return yaw, pitch, roll
+# Move the window to the desired position (x, y)
+window_x = 0  # Horizontal position
+window_y = -50  # Vertical position
+cv2.moveWindow('Lines Detection', window_x, window_y)
+angle = 0
+fit = None
+errors = 0
+lastX = 500
+fps = 0
+frame_count = 0
+fps_start_time = time.time()
 
-def get_orientation(data_line):
-    yaw = None  # Initialize a list for the orientation data
-    pitch = None
-    roll = None
-    if devMode:
-        yaw = data[data_line]
-        data_line += 1
-        pitch = data[data_line]
-        data_line += 1
-        roll = data[data_line]
-
-    else:
-        quaternion = bno.quaternion
-        x, y, z, w = quaternion
-        yaw, pitch, roll = quaternion_to_euler(x, y, z, w)
-
-        with open('/home/malte/test', "a") as file:    
-            file.write(f"{yaw}\n")
-            file.write(f"{pitch}\n")
-            file.write(f"{roll}\n")
-        
-        print(f"Yaw: {yaw:.2f}, Pitch: {pitch:.2f}, Roll: {roll:.2f}")
-
-
-    return yaw, pitch, roll
+output_filename = '/home/malte/TestRunRealScenario1234.mp4'
+fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+recordingFPS = 50
+recording_size = (640, 480)
+out = cv2.VideoWriter(output_filename, fourcc, recordingFPS, recording_size)
 
 while True:
+    
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
-
+    if errors > 10:
+        break
     ret = False
-
     if devMode:
         ret, frame = cap.read()
     else:
         frame = picam2.capture_array()
         ret = True
-
-    
     if ret:
-        get_orientation(dataIteration)
-        dataIteration += 3
         if not devMode:
             frame = cv2.rotate(frame, cv2.ROTATE_180)
         frame_bgr = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
         out.write(frame_bgr)
         #time.sleep(1)
+        errors = 0
         space = False
         turnAround = False
 
@@ -573,8 +517,7 @@ while True:
                 
             print(DrivingAngle)
                 
-            if not devMode:
-                runMotors(DrivingAngle, 40)
+            runMotors(DrivingAngle, 40)
                 
             cv2.putText(processed_frame, f"ANGLE: {DrivingAngle:.2f}", (300, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
@@ -583,9 +526,9 @@ while True:
         if 0xFF == ord('q'):
             time.sleep(100)
             break
+        #time.sleep(0.02)
     else:
-        break
-
+        errors = errors + 1
 if devMode:
     cap.release()
     
@@ -594,9 +537,6 @@ cv2.destroyAllWindows()
 
 if not devMode:
     runMotors(0, 0)
-    time.sleep(1)
-    runMotors(0, 0)
     lgpio.gpio_write(h, LedPin, 0)
     lgpio.gpiochip_close(h)
     print("GPIO closed.")
-

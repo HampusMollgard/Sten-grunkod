@@ -1,0 +1,223 @@
+import cv2
+import numpy as np
+import time
+import matplotlib.pyplot as plt
+import math
+
+padding = 50  # Padding size
+threshold = 90  # Threshold for "almost black" pixels
+stenOverlay = cv2.imread("STEN.png")
+stenOverlay = cv2.resize(stenOverlay, (200, 175), cv2.INTER_AREA)
+
+video_path = 'film3.mp4'  # Replace with your video path
+cap = cv2.VideoCapture(video_path)
+
+with open("test3", "r") as file:
+    data = file.readlines()
+data_line = 0
+
+if not cap.isOpened():
+    print("Could not open the video!")
+    exit()
+
+# Create a large blank canvas for the map
+canvas_size = (3000, 3000)  # Adjust this size based on your expected mapping area
+canvas = np.ones(canvas_size, dtype=np.uint8) * 255  # White canvas
+canvas_center = (canvas_size[1] // 2, canvas_size[0] // 2)  # Center of the canvas
+
+rotation_angle = 0  # Initial rotation angle in degrees
+blending_factor = 0.05
+prevPoints = None
+
+def findpointsToTrack(frame):
+
+    # Original dimensions of the current frame
+    original_height, original_width = frame.shape[:2]
+
+    # Add white padding around the frame
+    frame_padded = cv2.copyMakeBorder(frame, padding, padding, padding, padding, cv2.BORDER_CONSTANT, value=(255, 255, 255))
+
+    # Create a mask to detect almost black pixels
+    mask = cv2.inRange(frame_padded, (0, 0, 0), (threshold, threshold, threshold))
+
+    # Invert the mask to make non-black pixels white
+    img_white_background = cv2.bitwise_not(mask)
+    img_white_background = cv2.cvtColor(img_white_background, cv2.COLOR_GRAY2BGR)
+
+    # Convert the padded image to grayscale
+    gray = cv2.cvtColor(img_white_background, cv2.COLOR_BGR2GRAY)
+
+    # Apply Canny edge detection
+    edges = cv2.Canny(gray, 50, 150)
+
+    # Find contours in the padded image
+    contours, _ = cv2.findContours(edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Draw all contours on the padded frame
+    frame_with_contours = frame_padded.copy()
+    cv2.drawContours(frame_with_contours, contours, -1, (0, 255, 0), 2)  # Green contours
+
+    # Assume the largest contour corresponds to the "L" shape
+    if len(contours) > 0:
+        cnt = max(contours, key=cv2.contourArea)
+
+        # Approximate the contour to reduce noise
+        epsilon = 0.02 * cv2.arcLength(cnt, True)
+        approx = cv2.approxPolyDP(cnt, epsilon, True)
+        newPoints = []
+        # Draw the approximated contour and corners
+        for point in approx:
+            x, y = point[0]
+            if padding + 15 < x < padding + original_width - 15 and padding + 50 < y < padding + original_height - 15:
+                cv2.circle(frame_with_contours, (x, y), 5, (0, 0, 255), -1)  # Draw red circles for corners
+                newPoints.append(point[0])
+        
+        if len(newPoints) > 0:
+            return newPoints
+
+    return None
+
+failedMapping = 0
+dx = 0
+dy = 0
+frameCounter = 0
+pointCandidate = None
+
+while True:
+    ret, frame = cap.read()
+    frameCounter += 1
+    frameWithPoints = frame
+    if not ret:
+        break
+
+    frame = cv2.GaussianBlur(frame, (21, 21), 0)
+
+    points = findpointsToTrack(frame)
+    
+    print(points)
+    
+    if prevPoints is not None and points is not None and len(points) > 0:
+        pointCandidate = points[0]
+        for point in points:
+            distances = np.linalg.norm(prevPoints - point, axis=1)  # Euclidean distance
+            closest_index = np.argmin(distances)
+
+            if distances[closest_index] < 50:
+                pointCandidate = point
+                break
+        
+        cv2.circle(frameWithPoints, (prevPoints[closest_index] - (padding, padding)), 5, (0, 0, 255), -1)  # Draw red circles for corners
+        cv2.circle(frameWithPoints, (pointCandidate - (padding, padding)), 5, (0, 255, 0), -1)  # Draw red circles for corners
+        
+        if distances[closest_index] < 50:
+            dx, dy = prevPoints[closest_index] - pointCandidate
+            failedMapping = 0
+        else:
+            print('failed')
+    else:
+        failedMapping += 1
+        
+    if failedMapping > 20:
+        canvas = np.ones(canvas_size, dtype=np.uint8) * 255  # White canvas
+    
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape
+
+    # Update rotation angle from data
+    if data_line < len(data) - 3:
+        rotation_angle = float(data[data_line]) - float(data[data_line - 3])
+        rotation_angle = -rotation_angle
+        data_line += 3
+    prevPoints = points
+
+    print(dy)
+    if pointCandidate is not None and failedMapping == 0:
+        # Given point
+        x1, y1 = pointCandidate
+        center_x, center_y = w / 2, h
+        distance = math.sqrt((x1 - center_x)**2 + (y1 - center_y)**2)
+        dx1 = x1 - center_x
+        dy1 = y1 - (center_y)
+        rad = math.atan(dx1 / dy1)
+    
+        dx2 = math.sin(rad + math.radians(rotation_angle)) * distance
+        dy2 = math.cos(rad + math.radians(rotation_angle)) * distance
+            
+        temp = min(abs(dx1 + dx2), abs(dx1 - dx2))
+
+        if rotation_angle > 0:
+            dx -= temp
+        else:
+            dx += temp
+
+        temp2 = min(abs(dy1 + dy2), abs(dy1 - dy2))
+        
+        if rotation_angle > 0:
+            dy += temp2
+        else:
+            dy -= temp2
+
+    print(dy)
+    if failedMapping == 0:
+        rotation_matrix = cv2.getRotationMatrix2D(canvas_center, rotation_angle, 1)
+        canvas = cv2.warpAffine(canvas, rotation_matrix, canvas_size, flags=cv2.INTER_LINEAR, borderValue=255)
+    
+    translation_matrix = np.array([[1, 0, -dx], [0, 1, -dy]], dtype=np.float32)
+    canvas = cv2.warpAffine(canvas, translation_matrix, canvas_size, flags=cv2.INTER_LINEAR, borderValue=255)
+
+    if failedMapping == 0:
+
+        # Overlay the new frame at the canvas center
+        x1, y1 = canvas_center[0] - w // 2, canvas_center[1] - int(h * 2) // 2
+        x2, y2 = x1 + w, y1 + h
+
+        # Ensure bounds within canvas
+        x1, y1 = max(x1, 0), max(y1, 0)
+        x2, y2 = min(x2, canvas_size[1]), min(y2, canvas_size[0])
+
+        # Blend the frame with the canvas
+        new_frame_cropped = gray[:y2 - y1, :x2 - x1]
+        canvas_cropped = canvas[y1:y2, x1:x2]
+
+        black_pixel_mask = new_frame_cropped < 50  # Mask for black pixels
+        blended = canvas_cropped.astype(np.float32)
+        blended[black_pixel_mask] = (
+            (1 - blending_factor) * canvas_cropped[black_pixel_mask].astype(np.float32) +
+            blending_factor * new_frame_cropped[black_pixel_mask].astype(np.float32)
+        )
+        canvas[y1:y2, x1:x2] = blended.astype(np.uint8)
+
+    canvas_filtered = canvas.copy() 
+    threshold1 = int(255 * 0.5)
+    _, mask = cv2.threshold(canvas_filtered, threshold1, 255, cv2.THRESH_BINARY_INV)
+    result = np.full_like(canvas_filtered, 255)
+    result[mask == 255] = canvas_filtered[mask == 255]
+
+    # Ensure the overlay image is smaller than the canvas
+    overlay_height, overlay_width = stenOverlay.shape[:2]
+    canvas_height, canvas_width = result.shape[:2]
+
+    # Calculate top-left corner to center the overlay
+    x_offset = (canvas_width - overlay_width) // 2
+    y_offset = (canvas_height - overlay_height) // 2
+    maskOverlay = np.all(stenOverlay < [255, 255, 255], axis=2)
+    result =  cv2.cvtColor(result, cv2.COLOR_GRAY2BGR)
+
+    for c in range(3):  # Loop over each color channel (B, G, R)
+        result[y_offset:y_offset + overlay_height, x_offset:x_offset + overlay_width, c][maskOverlay] = \
+            stenOverlay[:, :, c][maskOverlay]
+    
+    # Display the canvas
+    cv2.imshow('Mapping Canvas', canvas)
+    cv2.imshow('Image', frameWithPoints)
+    # Exit on 'q'
+    if cv2.waitKey(30) & 0xFF == ord('q'):
+        break
+    
+    print(frameCounter)
+    if frameCounter > 490:
+        continue
+
+# Release resources
+cap.release()
+cv2.destroyAllWindows()
